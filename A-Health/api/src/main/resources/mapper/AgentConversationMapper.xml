@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.kmbeast.mapper.AgentConversationMapper">
+
+    <!-- 通用查询映射结果 -->
+    <resultMap id="BaseResultMap" type="com.kmbeast.pojo.entity.AgentConversation">
+        <id column="id" property="id"/>
+        <result column="user_id" property="userId"/>
+        <result column="role" property="role"/>
+        <result column="content" property="content"/>
+        <result column="intent_type" property="intentType"/>
+        <result column="create_time" property="createTime"/>
+    </resultMap>
+
+    <!-- 插入对话记录 -->
+    <insert id="insertConversation" parameterType="com.kmbeast.pojo.entity.AgentConversation"
+            useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO agent_conversation (user_id, role, content, intent_type, create_time)
+        VALUES (#{userId}, #{role}, #{content}, #{intentType}, #{createTime})
+    </insert>
+
+    <!-- 获取用户最近的对话记录 -->
+    <select id="getRecentByUserId" resultMap="BaseResultMap">
+        SELECT id, user_id, role, content, intent_type, create_time
+        FROM agent_conversation
+        WHERE user_id = #{userId}
+        ORDER BY create_time ASC
+        LIMIT #{limit}
+    </select>
+
+    <!-- 清理用户指定天数前的旧对话 -->
+    <delete id="cleanOldConversations">
+        DELETE FROM agent_conversation
+        WHERE user_id = #{userId}
+        AND create_time &lt; DATE_SUB(NOW(), INTERVAL #{daysAgo} DAY)
+    </delete>
+
+</mapper>

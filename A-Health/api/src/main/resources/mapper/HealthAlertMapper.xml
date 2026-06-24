@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.kmbeast.mapper.HealthAlertMapper">
+
+    <!-- 通用查询映射结果 -->
+    <resultMap id="BaseResultMap" type="com.kmbeast.pojo.entity.HealthAlert">
+        <id column="id" property="id"/>
+        <result column="user_id" property="userId"/>
+        <result column="alert_level" property="alertLevel"/>
+        <result column="model_name" property="modelName"/>
+        <result column="current_value" property="currentValue"/>
+        <result column="content" property="content"/>
+        <result column="status" property="status"/>
+        <result column="create_time" property="createTime"/>
+    </resultMap>
+
+    <!-- 插入预警记录 -->
+    <insert id="insertAlert" parameterType="com.kmbeast.pojo.entity.HealthAlert"
+            useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO health_alert (user_id, alert_level, model_name, current_value, content, status, create_time)
+        VALUES (#{userId}, #{alertLevel}, #{modelName}, #{currentValue}, #{content}, #{status}, #{createTime})
+    </insert>
+
+    <!-- 获取用户未处理预警 -->
+    <select id="getUnprocessedByUserId" resultMap="BaseResultMap">
+        SELECT id, user_id, alert_level, model_name, current_value, content, status, create_time
+        FROM health_alert
+        WHERE user_id = #{userId} AND status = 0
+        ORDER BY create_time DESC
+    </select>
+
+    <!-- 标记预警为已处理 -->
+    <update id="markAsProcessed">
+        UPDATE health_alert
+        SET status = 1
+        WHERE id = #{id}
+    </update>
+
+    <!-- 获取用户指定级别预警 -->
+    <select id="getAlertsByLevel" resultMap="BaseResultMap">
+        SELECT id, user_id, alert_level, model_name, current_value, content, status, create_time
+        FROM health_alert
+        WHERE user_id = #{userId} AND alert_level = #{alertLevel}
+        ORDER BY create_time DESC
+    </select>
+
+    <!-- 清理旧预警 -->
+    <delete id="cleanOldAlerts">
+        DELETE FROM health_alert
+        WHERE create_time &lt; DATE_SUB(NOW(), INTERVAL #{daysAgo} DAY)
+    </delete>
+
+</mapper>

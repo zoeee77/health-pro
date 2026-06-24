@@ -1,0 +1,66 @@
+# 服务配置
+server:
+  port: 21090
+  servlet:
+    context-path: /api/v1.0/self-health-api
+# API地址前缀，用于接口拦截放行
+my-server:
+  api-context-path: /api/v1.0/self-health-api
+#MySQL与文件上传限制配置
+spring:
+  servlet:
+    multipart:
+      max-file-size: 10MB
+      max-request-size: 10MB
+  datasource:
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    url: jdbc:mysql://${DB_HOST:localhost}:${DB_PORT:3306}/${DB_NAME:selfhealth}?characterEncoding=utf8&useSSL=false&serverTimezone=GMT%2B8&allowPublicKeyRetrieval=true
+    username: ${DB_USERNAME:root}
+    password: ${DB_PASSWORD:}
+  # Spring AI 配置（OpenAI 协议兼容 DeepSeek）
+  ai:
+    openai:
+      api-key: ${AI_API_KEY:sk-placeholder-for-local-dev}
+      base-url: ${AI_BASE_URL:https://api.deepseek.com}
+      chat:
+        options:
+          model: ${AI_MODEL:deepseek-chat}
+          temperature: ${AI_TEMPERATURE:0.7}
+  # RestTemplate配置
+  resttemplate:
+    connection-timeout: 10000
+    read-timeout: 60000
+# Mybatis Plus配置
+mybatis-plus:
+  configuration:
+#    log-impl: org.apache.ibatis.logging.stdout.StdOutImpl # 开启日志
+    map-underscore-to-camel-case: true # 开启驼峰命名
+  global-config:
+    db-config:
+      id-type: auto # 主键策略
+  mapper-locations: classpath*:/mapper/**/*.xml # mapper文件位置
+
+# DeepSeek API配置（旧版，保留兼容）
+deepseek:
+  api:
+    key: ${AI_API_KEY:}
+    url: ${AI_BASE_URL:https://api.deepseek.com}/v1/chat/completions
+    enabled: ${DEEPSEEK_API_ENABLED:true}  # 是否启用DeepSeek API，余额不足时可设置为false
+
+# Agent 配置
+agent:
+  # 混合意图识别配置
+  hybrid:
+    enabled: true  # 是否启用混合意图识别
+    # 高置信度阈值：关键词匹配得分 >= 此值时直接使用规则路由
+    high-confidence-threshold: 0.6
+    # Function Calling 开关
+    function-calling-enabled: true
+
+# AES加密配置（用于敏感健康数据加密存储）
+aes:
+  secret-key: ${AES_SECRET_KEY:}
+
+# JWT配置
+jwt:
+  private-key: ${JWT_PRIVATE_KEY:}

@@ -1,0 +1,51 @@
+package com.kmbeast.context;
+
+import java.util.HashMap;
+import java.util.Map;
+
+/**
+ * 用户身份支持器
+ */
+public class LocalThreadHolder {
+
+    private static final ThreadLocal<Map<String, Integer>> USER_HOLDER = new ThreadLocal<>();
+
+    /**
+     * 设置用户信息
+     *
+     * @param userId   用户ID
+     * @param role 用户角色
+     */
+    public static void setUserId(Integer userId, Integer role) {
+        Map<String, Integer> map = new HashMap<>();
+        map.put("userId", userId);
+        map.put("role", role);
+        USER_HOLDER.set(map);
+    }
+
+    /**
+     * 取出用户ID
+     *
+     * @return Integer
+     */
+    public static Integer getUserId() {
+        Map<String, Integer> map = USER_HOLDER.get();
+        return map != null ? map.get("userId") : null;
+    }
+
+    /**
+     * 取出用户角色
+     */
+    public static Integer getRoleId() {
+        Map<String, Integer> map = USER_HOLDER.get();
+        return map != null ? map.get("role") : null;
+    }
+
+    /**
+     * 防止内存溢出，当前线程结束，释放资源
+     */
+    public static void clear() {
+        USER_HOLDER.remove();
+    }
+
+}

@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.kmbeast.mapper.HealthReminderMapper">
+
+    <!-- 通用查询映射结果 -->
+    <resultMap id="BaseResultMap" type="com.kmbeast.pojo.entity.HealthReminder">
+        <id column="id" property="id"/>
+        <result column="user_id" property="userId"/>
+        <result column="reminder_type" property="reminderType"/>
+        <result column="content" property="content"/>
+        <result column="status" property="status"/>
+        <result column="scheduled_time" property="scheduledTime"/>
+        <result column="create_time" property="createTime"/>
+    </resultMap>
+
+    <!-- 插入提醒记录 -->
+    <insert id="insertReminder" parameterType="com.kmbeast.pojo.entity.HealthReminder"
+            useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO health_reminder (user_id, reminder_type, content, status, scheduled_time, create_time)
+        VALUES (#{userId}, #{reminderType}, #{content}, #{status}, #{scheduledTime}, #{createTime})
+    </insert>
+
+    <!-- 获取用户未读提醒 -->
+    <select id="getUnreadByUserId" resultMap="BaseResultMap">
+        SELECT id, user_id, reminder_type, content, status, scheduled_time, create_time
+        FROM health_reminder
+        WHERE user_id = #{userId} AND status = 0
+        ORDER BY scheduled_time ASC
+    </select>
+
+    <!-- 标记提醒为已读 -->
+    <update id="markAsRead">
+        UPDATE health_reminder
+        SET status = 1
+        WHERE id = #{id}
+    </update>
+
+    <!-- 获取指定时间前的提醒（到期提醒） -->
+    <select id="getDueReminders" resultMap="BaseResultMap">
+        SELECT id, user_id, reminder_type, content, status, scheduled_time, create_time
+        FROM health_reminder
+        WHERE status = 0 AND scheduled_time &lt;= #{now}
+        ORDER BY scheduled_time ASC
+    </select>
+
+    <!-- 清理旧提醒 -->
+    <delete id="cleanOldReminders">
+        DELETE FROM health_reminder
+        WHERE create_time &lt; DATE_SUB(NOW(), INTERVAL #{daysAgo} DAY)
+    </delete>
+
+</mapper>
