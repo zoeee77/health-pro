@@ -264,6 +264,23 @@ AOP 实现自定义 `@Pager` 分页注解：
 - 统一分页参数解析与结果封装
 - 减少 Controller 层重复代码
 
+### 全局异常处理与统一响应
+
+`GlobalExceptionHandler` + `BusinessException` + `AssertUtils` 构建完整的异常处理体系：
+
+- **@RestControllerAdvice**：全局拦截 Controller 层异常，统一返回 JSON 格式
+- **BusinessException**：自定义业务异常，支持携带状态码和错误信息
+- **AssertUtils**：业务断言工具，提供 `notNull`、`notEmpty` 等常用校验方法
+- **Result<T>**：统一响应体结构（`code` / `message` / `data`），所有接口遵循同一返回格式
+- **ResultCode**：响应码枚举，集中管理 200/400/401/500 等状态码及描述
+
+异常处理流程：
+```
+Controller → Service → AssertUtils.notNull() 校验失败
+    → 抛出 BusinessException → @RestControllerAdvice 拦截
+    → 封装为 Result<T> 返回前端
+```
+
 ### AC 自动机敏感词过滤
 
 `AhoCorasickFilter` 实现高效的 AC 自动机敏感词过滤：
