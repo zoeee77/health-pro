@@ -47,6 +47,7 @@ public class HealthAgent {
     private final AgentConversationMapper agentConversationMapper;
     private final HealthSkillsAsTools healthSkillsAsTools;
     private final ChatSessionService chatSessionService;
+    private final com.kmbeast.utils.RedisService redisService;
 
     // 技能实现
     private final DietAnalysisSkill dietAnalysisSkill;
@@ -73,7 +74,8 @@ public class HealthAgent {
                        ExerciseAdviceSkill exerciseAdviceSkill,
                        SleepAnalysisSkill sleepAnalysisSkill,
                        AlertSkill alertSkill,
-                       ChatSessionService chatSessionService) {
+                       ChatSessionService chatSessionService,
+                       com.kmbeast.utils.RedisService redisService) {
         this.chatClient = chatClient;
         this.profileBuilder = profileBuilder;
         this.dietHistoryMapper = dietHistoryMapper;
@@ -88,6 +90,7 @@ public class HealthAgent {
         this.sleepAnalysisSkill = sleepAnalysisSkill;
         this.alertSkill = alertSkill;
         this.chatSessionService = chatSessionService;
+        this.redisService = redisService;
     }
 
     @PostConstruct
@@ -109,13 +112,16 @@ public class HealthAgent {
     private static final int SAVE_THRESHOLD = 2;
 
     /**
-     * 获取指定会话的对话记忆（优先从数据库加载历史）
+     * 获取指定会话的对话记忆（三层缓存：Redis → 数据库 → 内存窗口）
      */
     public ConversationMemory getMemory(Integer sessionId) {
         return memoryStore.computeIfAbsent(sessionId, k -> {
-            ConversationMemory memory = new ConversationMemory();
-            // 从数据库加载历史消息
-            loadSessionHistoryToMemory(sessionId, memory);
+            ConversationMemory memory = new ConversationMemory(redisService, sessionId);
+            // 优先从 Redis 缓存加载历史
+            if (!memory.loadFromRedis()) {
+                // Redis 未命中，从数据库加载
+                loadSessionHistoryToMemory(sessionId, memory);
+            }
             // 初始化保存索引为已加载的历史记录数量
             lastSavedIndexStore.put(sessionId, memory.getTurns().size());
             return memory;

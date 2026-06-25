@@ -8,6 +8,7 @@
 - **Spring Boot 3.2.5** - Java 17+
 - **MyBatis-Plus 3.5.7** - 持久层框架
 - **MySQL** - 关系型数据库
+- **Redis** - 缓存（对话记忆、敏感词词典）
 - **Spring AI 1.0.0** - AI 集成（兼容 DeepSeek OpenAI 协议）
 - **JWT** - 用户认证
 - **Lombok** - 简化开发
@@ -61,6 +62,7 @@ health-pro/
 - Java 17+
 - Maven 3.6+
 - MySQL 5.7+ / 8.0+
+- Redis 6.0+
 - Node.js 18+
 
 ### 1. 数据库初始化
@@ -121,6 +123,12 @@ DB_NAME=selfhealth
 DB_USERNAME=root
 DB_PASSWORD=your_database_password
 
+# Redis 配置
+REDIS_HOST=localhost
+REDIS_PORT=6379
+REDIS_PASSWORD=
+REDIS_DATABASE=0
+
 # AI API 配置（DeepSeek）
 AI_API_KEY=your_deepseek_api_key
 AI_BASE_URL=https://api.deepseek.com
@@ -174,6 +182,131 @@ Mock 服务运行在 `http://localhost:21090`，提供基础 API 响应。
 | `/dashboard/*` | 数据看板 |
 | `/ai-chat/*` | AI 聊天 |
 | `/file/*` | 文件上传 |
+
+## AI 架构设计
+
+### 混合意图识别架构
+
+AI 健康助手采用 **6 意图混合识别架构**，结合规则关键词匹配与 LLM 二次判定：
+
+- **高置信度（≥0.6）**：关键词匹配得分达标时，直接路由到对应 Skill
+- **低置信度（<0.6）**：走 Function Calling 流程，由 LLM 自动选择最合适的 Tool
+- **意图类型**：饮食分析、运动建议、睡眠分析、异常预警、健康咨询、数据查询
+
+#### 意图识别流程
+
+```
+用户输入 → HybridIntentRecognizer
+    ├─ 规则关键词匹配 → 得分 ≥ 0.6 → 直接路由 Skill
+    └─ 得分 < 0.6 → Function Calling → LLM 选择 Tool → 执行
+```
+
+### HealthSkill 技能体系
+
+抽象 `HealthSkill` 接口，通过 `@Tool` 注解暴露给 LLM 调用，实现 4 个核心技能模块：
+
+| Skill 模块 | 功能 | 对应工具 |
+|-----------|------|---------|
+| `DietAnalysisSkill` | 饮食分析 | 营养摄入分析、饮食建议 |
+| `ExerciseAdviceSkill` | 运动建议 | 运动计划制定、运动量评估 |
+| `SleepAnalysisSkill` | 睡眠分析 | 睡眠质量评估、改善建议 |
+| `AlertSkill` | 异常预警 | 健康指标异常检测与预警 |
+
+### 用户画像构建 (HealthProfileBuilder)
+
+`HealthProfileBuilder` 聚合多表数据构建用户健康画像，并动态注入 SystemPrompt：
+
+- 聚合用户基础信息、健康记录、饮食记录、运动数据等 **4 张核心表**
+- 动态构建用户健康画像 `HealthProfile`
+- 将画像数据注入 LLM 的 SystemPrompt，实现个性化健康建议
+
+### 对话记忆管理 (ConversationMemory)
+
+`ConversationMemory` 实现三层缓存架构的对话上下文管理：
+
+- **Redis 缓存层**：优先从 Redis Hash 加载历史对话，避免重复查询数据库
+- **持久层**：数据库增量持久化，防止内存丢失
+- **内存窗口层**：`ConcurrentHashMap` 存储活跃会话，每会话维持 **20 轮** 对话上下文
+- **清理策略**：超过窗口大小的旧对话自动清理，保持上下文精简
+- **Redis Key 结构**：`agent:conversation:{sessionId}` Hash 存储
+
+### 推荐算法 (User-CF 协同过滤)
+
+食谱与健康资讯推荐采用 **User-CF 协同过滤算法**：
+
+- **相似度计算**：余弦相似度衡量用户间相似性
+- **近邻筛选**：Top-20 相似用户作为推荐依据
+- **数据源**：5 类用户行为数据（收藏、浏览、点赞、评论、记录）
+- **应用场景**：食谱推荐、健康资讯推荐
+
+## 工程化特性
+
+### AES 双模式加密
+
+敏感健康数据采用 AES 双模式加密存储：
+
+- 支持 AES-128 / AES-256 两种密钥长度
+- 加密配置通过 `AES_SECRET_KEY` 环境变量管理
+
+### ThreadLocal 用户身份传递
+
+`LocalThreadHolder` 使用 `ThreadLocal` 实现请求级用户身份传递：
+
+- JWT 拦截器解析 Token 后存入 ThreadLocal
+- 业务层随时获取当前用户信息，无需参数传递
+- 请求结束后自动清理，防止内存泄漏
+
+### @Pager 分页注解
+
+AOP 实现自定义 `@Pager` 分页注解：
+
+- 拦截标注 `@Pager` 的方法，自动处理分页逻辑
+- 统一分页参数解析与结果封装
+- 减少 Controller 层重复代码
+
+### AC 自动机敏感词过滤
+
+`AhoCorasickFilter` 实现高效的 AC 自动机敏感词过滤：
+
+- 多模式匹配算法，一次遍历完成所有敏感词检测
+- 支持动态添加/移除敏感词
+- 应用于用户输入、评论等内容的合规性检查
+- **缓存策略**：敏感词词典通过 Redis Hash 缓存（24 小时过期），降级到数据库加载，最终降级到内置默认词
+
+### Redis 缓存策略
+
+项目使用 Redis 实现多维度缓存加速：
+
+| 缓存场景 | Redis 数据结构 | Key 模式 | 过期策略 |
+|---------|---------------|----------|---------|
+| 对话记忆 | Hash | `agent:conversation:{sessionId}` | 24 小时 |
+| 敏感词词典 | Hash | `filter:sensitive_words` | 24 小时 |
+| 热点数据缓存 | String/Hash | 自定义 | 可配置 |
+
+缓存架构设计：
+- **三级降级策略**：Redis 缓存 → 数据库 → 内置默认值
+- **增量更新**：对话记忆增量写入 Redis，减少全量同步开销
+- **防穿透**：缓存未命中时写入空值，防止恶意请求打到数据库
+
+## 性能优化
+
+### SQL 索引优化
+
+项目包含完整的索引优化方案（详见 `A-Health/sql/optimize_indexes.sql`）：
+
+- **联合索引**：覆盖高频查询场景，避免回表
+- **覆盖索引**：查询所需字段全部在索引中，减少磁盘 I/O
+- **复合索引**：多条件组合查询优化
+- **执行计划优化**：从全表扫描（`type: ALL`）优化为索引范围扫描（`type: ref`）
+
+### 关键优化点
+
+| 优化场景 | 优化前 | 优化后 | 性能提升 |
+|---------|--------|--------|---------|
+| flow_index 聚合查询 | 全表扫描数千行 | 索引范围扫描数十行 | 100x+ |
+| health_news 统计查询 | 4 个子查询 N+1 问题 | LEFT JOIN + GROUP BY | 4x+ |
+| 敏感词过滤 | 每次从数据库加载 | Redis 缓存 + AC 自动机 | 内存级 O(n) |
+| 对话上下文加载 | 每次都查数据库 | Redis → DB 三级降级 | 缓存命中时 O(1) |
 
 ## 开源说明
 

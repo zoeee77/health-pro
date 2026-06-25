@@ -2,15 +2,18 @@ package com.kmbeast.agent;
 
 import com.kmbeast.mapper.AgentConversationMapper;
 import com.kmbeast.pojo.entity.AgentConversation;
+import com.kmbeast.utils.RedisService;
 import lombok.Data;
 import lombok.extern.slf4j.Slf4j;
 
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.TimeUnit;
 
 /**
  * 智能体对话记忆管理
+ * 采用三层缓存架构：Redis 缓存 → 数据库 → 内存窗口
  * 保留最近的对话轮次，为 LLM 提供连贯的多轮上下文
  */
 @Slf4j
@@ -18,14 +21,35 @@ import java.util.List;
 public class ConversationMemory {
     private final int maxTurns = 20;
     private final List<Turn> turns = new ArrayList<>();
+    private final RedisService redisService;
+    private final String memoryKey;
     // 用于跟踪自上次保存以来新增的消息数量
     private int unsavedCount = 0;
+    // Redis 缓存过期时间：24 小时
+    private static final long REDIS_TTL_HOURS = 24;
+
+    /**
+     * 构造函数：使用 Redis 缓存
+     */
+    public ConversationMemory(RedisService redisService, Integer userId) {
+        this.redisService = redisService;
+        this.memoryKey = "agent:conversation:" + userId;
+    }
+
+    /**
+     * 构造函数：不使用 Redis（降级模式）
+     */
+    public ConversationMemory() {
+        this.redisService = null;
+        this.memoryKey = null;
+    }
 
     /**
      * 添加用户消息
      */
     public void addUserMessage(String content) {
         turns.add(new Turn("user", content, LocalDateTime.now()));
+        syncToRedis();
         trim();
     }
 
@@ -34,6 +58,7 @@ public class ConversationMemory {
      */
     public void addAssistantMessage(String content) {
         turns.add(new Turn("assistant", content, LocalDateTime.now()));
+        syncToRedis();
         trim();
     }
 
@@ -52,10 +77,69 @@ public class ConversationMemory {
         while (turns.size() > maxTurns) {
             turns.remove(0);
         }
+        // 同步裁剪后的状态到 Redis
+        syncToRedis();
     }
 
     /**
-     * 从数据库加载历史对话
+     * 同步对话历史到 Redis 缓存
+     * 使用 Hash 结构存储，key 为 message:{index}，便于增量更新
+     */
+    private void syncToRedis() {
+        if (redisService == null || memoryKey == null) {
+            return;
+        }
+        try {
+            // 清空旧缓存，写入当前完整窗口
+            redisService.delete(memoryKey);
+            for (int i = 0; i < turns.size(); i++) {
+                Turn turn = turns.get(i);
+                redisService.hSet(memoryKey, "msg:" + i, turn.getRole() + "|" + turn.getContent());
+            }
+            redisService.expire(memoryKey, REDIS_TTL_HOURS, TimeUnit.HOURS);
+        } catch (Exception e) {
+            log.warn("同步对话到 Redis 失败: {}", e.getMessage());
+        }
+    }
+
+    /**
+     * 从 Redis 缓存加载历史对话（优先于数据库）
+     * @return 是否加载成功
+     */
+    public boolean loadFromRedis() {
+        if (redisService == null || memoryKey == null) {
+            return false;
+        }
+        try {
+            var entries = redisService.hGetAll(memoryKey);
+            if (entries != null && !entries.isEmpty()) {
+                // 按索引排序恢复
+                entries.entrySet().stream()
+                        .sorted((a, b) -> {
+                            int ia = Integer.parseInt(a.getKey().toString().replace("msg:", ""));
+                            int ib = Integer.parseInt(b.getKey().toString().replace("msg:", ""));
+                            return Integer.compare(ia, ib);
+                        })
+                        .forEach(entry -> {
+                            String val = entry.getValue().toString();
+                            int sepIdx = val.indexOf('|');
+                            if (sepIdx > 0) {
+                                String role = val.substring(0, sepIdx);
+                                String content = val.substring(sepIdx + 1);
+                                turns.add(new Turn(role, content, LocalDateTime.now()));
+                            }
+                        });
+                log.info("从 Redis 缓存加载了 {} 条对话历史", turns.size());
+                return true;
+            }
+        } catch (Exception e) {
+            log.warn("从 Redis 加载对话失败: {}", e.getMessage());
+        }
+        return false;
+    }
+
+    /**
+     * 从数据库加载历史对话（Redis 未命中时的降级方案）
      * @param mapper 对话记录 Mapper
      * @param userId 用户ID
      */
@@ -69,6 +153,8 @@ public class ConversationMemory {
                 Turn turn = new Turn(record.getRole(), record.getContent(), record.getCreateTime());
                 turns.add(turn);
             }
+            // 加载后同步到 Redis 缓存
+            syncToRedis();
             log.info("从数据库加载了 {} 条历史对话，用户ID: {}", records.size(), userId);
         } catch (Exception e) {
             log.warn("加载历史对话失败，用户ID: {}, 错误: {}", userId, e.getMessage());
@@ -94,7 +180,7 @@ public class ConversationMemory {
                         .userId(userId)
                         .role(turn.getRole())
                         .content(turn.getContent())
-                        .createTime(turn.getTimestamp())
+                        .createTime(turn.getCreateTime())
                         .build();
                 mapper.insertConversation(conversation);
                 unsavedCount++;
@@ -119,6 +205,17 @@ public class ConversationMemory {
      */
     public void resetUnsavedCount() {
         unsavedCount = 0;
+    }
+
+    /**
+     * 清除 Redis 缓存（用户登出或会话结束时调用）
+     */
+    public void clearCache() {
+        if (redisService != null && memoryKey != null) {
+            redisService.delete(memoryKey);
+            log.info("已清除用户对话 Redis 缓存: {}", memoryKey);
+        }
+        turns.clear();
     }
 
     /**
