@@ -53,9 +53,9 @@ public class AhoCorasickFilter {
     private static final String REDIS_KEY = "filter:sensitive_words";
 
     /**
-     * 默认敏感词列表
+     * 默认敏感词列表（静态字段，供 EvaluationsServiceImpl 等类直接引用）
      */
-    private static final List<String> DEFAULT_WORDS = Arrays.asList(
+    public static final List<String> sensitiveWords = Arrays.asList(
             "暴力", "色情", "赌博", "毒品"
     );
 
@@ -72,7 +72,7 @@ public class AhoCorasickFilter {
      * 从内置默认词构建
      */
     private void buildFromDefaultWords() {
-        build(DEFAULT_WORDS);
+        build(sensitiveWords);
     }
 
     /**
@@ -112,8 +112,8 @@ public class AhoCorasickFilter {
         }
 
         // 3. 使用默认词
-        log.info("使用内置默认敏感词: {} 个", DEFAULT_WORDS.size());
-        return DEFAULT_WORDS;
+        log.info("使用内置默认敏感词: {} 个", sensitiveWords.size());
+        return sensitiveWords;
     }
 
     /**
